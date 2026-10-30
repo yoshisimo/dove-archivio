@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <meta name="theme-color" content="#143d3a">
+  <meta name="description" content="Archivio domestico personale: trova subito dove hai messo un oggetto.">
+  <meta name="mobile-web-app-capable" content="yes">
+  <link rel="icon" href="icons/icon-192.png" type="image/png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="style.css">
+  <title>Dov'è? — Archivio di casa</title>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">⌖</div><div><strong>Dov'è?</strong><small>Il mio archivio di casa</small></div></div>
+      <button class="icon-btn" id="top-add" aria-label="Aggiungi un oggetto" title="Aggiungi un oggetto">+</button>
+    </header>
+    <main id="view" class="view" aria-live="polite"></main>
+    <nav class="tabbar" id="tabbar" aria-label="Navigazione principale">
+      <button data-tab="search"><span aria-hidden="true">⌕</span>Cerca</button>
+      <button data-tab="places"><span aria-hidden="true">▤</span>Posizioni</button>
+      <button data-tab="items"><span aria-hidden="true">☷</span>Oggetti</button>
+      <button data-tab="data"><span aria-hidden="true">⚙</span>Dati</button>
+    </nav>
+  </div>
+  <dialog id="form-dialog" aria-label="Modifica dati"><div id="dialog-content"></div></dialog>
+  <dialog id="photo-dialog" class="photo-dialog" aria-label="Fotografia"><button class="photo-close" id="photo-close" type="button" aria-label="Chiudi fotografia">×</button><img id="photo-full" alt="Fotografia ingrandita"></dialog>
+  <input id="import-file" type="file" accept="application/json,.json" hidden>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="app.js" defer></script>
+</body>
+</html>

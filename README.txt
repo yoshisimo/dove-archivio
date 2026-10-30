@@ -1,0 +1,54 @@
+DOV'È? — VERSIONE 0.1
+======================
+
+Un piccolo archivio personale per Android e computer.
+Funzioni: ricerca, posizioni annidate, oggetti, fotografie dei luoghi,
+spostamento, eliminazione, backup e ripristino.
+
+IMPORTANTISSIMO
+L'app conserva OGGETTI E FOTO SOLO NEL BROWSER/DISPOSITIVO su cui
+la usi. NON si sincronizza tra telefono e PC. Se cancelli i dati del
+sito, disinstalli o cambi telefono, potresti perdere l'archivio.
+ESPORTA PERIODICAMENTE IL BACKUP dalla sezione "Dati" e custodisci
+il file JSON al di fuori dell'app (es. cartella documenti o memoria esterna).
+
+COME INSTALLARLA SU ANDROID (Chrome)
+1. Estrai lo ZIP sul computer.
+2. Pubblica tutti i file in una cartella su un servizio HTTPS per siti
+   statici (es. GitHub Pages), mantenendo la cartella icons.
+   Esempio GitHub Pages:
+   - Crea un repository GitHub (pubblico per usare Pages gratuitamente).
+   - Carica nel repository i FILE DENTRO la cartella dove-app.
+   - Apri Settings > Pages > Deploy from a branch > main > /(root).
+   - Attendi che GitHub mostri l'indirizzo HTTPS del sito.
+3. Apri il sito HTTPS da Chrome su Android.
+4. Menu ⋮ > "Installa app" o "Aggiungi a schermata Home".
+5. Avvia una prima volta mentre sei connesso: poi i file dell'app sono
+   disponibili anche offline.
+
+Le sole risorse pubbliche sul sito sono i file dell'APPLICAZIONE; i dati
+che inserisci e le foto rimangono nel database locale del browser.
+Per impostazione predefinita non viene effettuato alcun invio dei tuoi
+dati a un server. Se apri l'app su un altro dispositivo, l'archivio
+inizialmente sarà vuoto.
+
+TEST SU COMPUTER
+Nella cartella dove-app, esegui:
+    python3 -m http.server 8000
+poi apri http://localhost:8000/ nel browser.
+
+APERTURA DIRETTA COME FILE
+Non aprire index.html tramite file:// per la versione definitiva: le
+funzionalità offline/archiviazione possono comportarsi diversamente.
+Per l'installazione da Chrome serve un'origine HTTPS o localhost.
+
+BACKUP
+Da Dati > Esporta backup scarichi UN file JSON che include anche le foto.
+Per ripristinarlo: Dati > Importa backup. Attenzione: l'importazione
+SOSTITUISCE i dati locali già presenti nel browser.
+
+PROSSIME VERSIONI POSSIBILI
+- Categorie predefinite personalizzabili
+- Più foto per ogni posizione
+- Evidenziazione di scatole direttamente sulle foto
+- QR code su scatole/cassetti
