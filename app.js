@@ -6,7 +6,7 @@ const $ = sel => document.querySelector(sel);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const uid = () => (globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 const normalized = s => String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it').trim();
-const state = {tab:'search',query:'',order:'alpha',locations:[],items:[],currentPlace:null,itemDetail:null,photoUrls:[]};
+const state = {tab:'search',query:'',order:'alpha',itemsFilter:'',bulkSelecting:false,selectedItems:new Set(),locations:[],items:[],currentPlace:null,itemDetail:null,photoUrls:[]};
 let db, toastTimeout, previewUrl;
 
 function openDatabase() {
@@ -77,14 +77,47 @@ function renderSearchResults(){
     .sort((a,b)=>{const aa=normalized(a.name).includes(q),bb=normalized(b.name).includes(q);return Number(bb)-Number(aa)||a.name.localeCompare(b.name,'it');});
   e.innerHTML=`<div class="section-line"><h2>Risultati</h2><span class="count">${found.length} trovati</span></div>${found.length?found.map(itemCard).join(''):empty('Nessun risultato','Prova un altro termine oppure registra un nuovo oggetto.','new-item','Aggiungi oggetto')}`;
 }
-function renderAllItems(v){
- const list=[...state.items];
+function filteredAndSortedItems(){
+ const q=normalized(state.itemsFilter);
+ const list=state.items.filter(x=>normalized([x.name,x.category||'',x.notes||'',pathOf(x.locationId)].join(' ')).includes(q));
  if(state.order==='category')list.sort((a,b)=>(a.category||'~').localeCompare(b.category||'~','it')||a.name.localeCompare(b.name,'it'));
  else if(state.order==='place')list.sort((a,b)=>pathOf(a.locationId).localeCompare(pathOf(b.locationId),'it')||a.name.localeCompare(b.name,'it'));
  else list.sort((a,b)=>a.name.localeCompare(b.name,'it'));
- v.innerHTML=`<div class="eyebrow">Inventario</div><h1>Tutti gli oggetti</h1><p class="top-copy">${state.items.length} registrati nel tuo archivio.</p><div class="action-row"><button class="btn btn-primary" data-action="new-item">+ Aggiungi oggetto</button></div><div class="section-line"><h2>Elenco</h2><div class="sort-row"><label for="sort-items">Ordina</label><select id="sort-items"><option value="alpha" ${state.order==='alpha'?'selected':''}>A–Z</option><option value="category" ${state.order==='category'?'selected':''}>Categoria</option><option value="place" ${state.order==='place'?'selected':''}>Posizione</option></select></div></div>${list.length?list.map(itemCard).join(''):empty('Nessun oggetto','Quando ne aggiungi uno, comparirà qui.','new-item','Aggiungi il primo oggetto')}`;
- $('#sort-items').addEventListener('change',e=>{state.order=e.target.value;render();});
+ return list;
 }
+function renderItemsList(){
+ const results=$('#items-list');if(!results)return;
+ const list=filteredAndSortedItems();
+ results.innerHTML=list.length?list.map(x=>state.bulkSelecting?
+  `<label class="bulk-item-row"><input type="checkbox" class="bulk-item-checkbox" value="${esc(x.id)}" ${state.selectedItems.has(x.id)?'checked':''}><span class="bulk-item-text"><strong>${esc(x.name)}</strong><small>${esc(pathOf(x.locationId))}</small>${x.category?`<small>${esc(x.category)}</small>`:''}</span></label>`:
+  itemCard(x)).join(''):
+  (state.items.length?'<p class="muted small">Nessun oggetto corrisponde al filtro.</p>':empty('Nessun oggetto','Quando ne aggiungi uno, comparirà qui.','new-item','Aggiungi il primo oggetto'));
+ const resultsCount=$('#items-results-count');if(resultsCount)resultsCount.textContent=`${list.length} ${list.length===1?'risultato':'risultati'}`;
+ const num=state.selectedItems.size;
+ const selectionCount=$('#bulk-selection-count');if(selectionCount)selectionCount.textContent=`${num} ${num===1?'selezionato':'selezionati'}`;
+ const move=$('#bulk-move');if(move){move.disabled=num===0;move.textContent=num?`Assegna posizione (${num})`:'Assegna posizione';}
+ const selectAll=$('#bulk-select-visible');if(selectAll)selectAll.disabled=!list.length;
+ const clear=$('#bulk-clear');if(clear)clear.disabled=!num;
+}
+function renderAllItems(v){
+ v.innerHTML=`<div class="eyebrow">Inventario</div><h1>Tutti gli oggetti</h1><p class="top-copy">${state.items.length} registrati nel tuo archivio.</p>
+ <div class="action-row"><button class="btn btn-primary" data-action="new-item">+ Aggiungi oggetto</button>${state.items.length?`<button class="btn ${state.bulkSelecting?'btn-secondary':'btn-outline'}" data-action="toggle-bulk">${state.bulkSelecting?'Termina selezione':'Seleziona più oggetti'}</button>`:''}</div>
+ <div class="field"><label for="items-filter">Filtra oggetti</label><input class="control" type="search" id="items-filter" autocomplete="off" value="${esc(state.itemsFilter)}" placeholder="Es. hard disk, Seagate, elettronica"></div>
+ <div class="section-line"><h2>Elenco</h2><div class="sort-row"><label for="sort-items">Ordina</label><select id="sort-items"><option value="alpha" ${state.order==='alpha'?'selected':''}>A–Z</option><option value="category" ${state.order==='category'?'selected':''}>Categoria</option><option value="place" ${state.order==='place'?'selected':''}>Posizione</option></select></div></div>
+ <p id="items-results-count" class="form-help" aria-live="polite"></p>
+ ${state.bulkSelecting?`<div class="bulk-tools"><button class="btn btn-outline" data-action="bulk-select-visible" id="bulk-select-visible">Seleziona tutti i risultati</button><button class="btn btn-text" data-action="bulk-clear" id="bulk-clear">Deseleziona tutti</button></div>`:''}
+ <div id="items-list" ${state.bulkSelecting?'role="group" aria-label="Seleziona gli oggetti da spostare"':''}></div>
+ ${state.bulkSelecting?`<div class="bulk-action-bar"><strong id="bulk-selection-count" aria-live="polite">0 selezionati</strong><button class="btn btn-primary" id="bulk-move" data-action="bulk-move" disabled>Assegna posizione</button></div>`:''}`;
+ $('#sort-items').addEventListener('change',e=>{state.order=e.target.value;renderItemsList();});
+ $('#items-filter').addEventListener('input',e=>{state.itemsFilter=e.target.value;renderItemsList();});
+ if(state.bulkSelecting){$('#items-list').addEventListener('change',e=>{
+  const box=e.target.closest('.bulk-item-checkbox');if(!box)return;
+  if(box.checked)state.selectedItems.add(box.value);else state.selectedItems.delete(box.value);
+  renderItemsList();
+ });}
+ renderItemsList();
+}
+
 function renderPlaces(v){
  const here=state.currentPlace?loc(state.currentPlace):null;
  if(state.currentPlace&&!here)state.currentPlace=null;
@@ -95,6 +128,7 @@ function renderPlaces(v){
  <div class="breadcrumbs"><button data-action="place" data-id="">Casa</button>${crumbs.map(p=>`<span>›</span><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
  ${here?.photo?`<div class="photo-grid"><button class="photo-card" data-action="zoom" data-id="${esc(here.id)}"><img src="${photoUrl(here.photo)}" alt="Fotografia di ${esc(here.name)}"><span>Fotografia della posizione · Tocca per ingrandire</span></button></div>`:''}
  <div class="action-row"><button class="btn btn-primary" data-action="new-location" data-parent="${esc(id||'')}">+ Sottoposizione</button><button class="btn btn-secondary" data-action="new-item" data-parent="${esc(id||'')}">+ Oggetto qui</button></div>
+ ${here?`<div class="action-row"><button class="btn btn-outline" data-action="add-existing-items" data-id="${esc(id)}">+ Aggiungi oggetti esistenti</button></div>`:''}
  ${here?`<div class="action-row"><button class="btn btn-outline" data-action="edit-location" data-id="${esc(id)}">Modifica questa posizione</button></div>`:''}
  <div class="section-line"><h2>Contenitori e stanze</h2><span class="count">${children.length}</span></div>
  ${children.length?children.map(p=>`<button class="place-row" data-action="place" data-id="${esc(p.id)}"><span class="place-icon" aria-hidden="true">${p.photo?'▧':'▤'}</span><span><span class="place-name">${esc(p.name)}</span><span class="place-count" style="display:block">${countWithin(p.id)} oggetti${p.photo?' · Foto disponibile':''}</span></span><span class="chevron">›</span></button>`).join(''):'<p class="muted small">Nessuna sottoposizione.</p>'}
@@ -114,7 +148,7 @@ function renderData(v){
   <div class="settings-panel"><h2>Esporta backup</h2><p>Scarica un file JSON con oggetti, posizioni e fotografie. Conservalo fuori dall'app.</p><button class="btn btn-primary" data-action="export">↓ Scarica backup completo</button></div>
   <div class="settings-panel"><h2>Ripristina backup</h2><p>Importa un backup già esportato. <strong>Sostituisce tutti i dati attuali</strong> di questo dispositivo.</p><button class="btn btn-outline" data-action="import">↑ Importa backup</button></div>
   <div class="settings-panel"><h2>Proteggi la memoria locale</h2><p>Chiedi al browser di non eliminare automaticamente l'archivio quando lo spazio scarseggia. Non sostituisce il backup.</p><button class="btn btn-secondary" data-action="persist">Richiedi archiviazione persistente</button></div>
-  <p class="small muted">Versione 0.1 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
+  <p class="small muted">Versione 0.3 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
 }
 function locationOptions(selected,excludeId=null){
   const excluded=new Set();
@@ -141,6 +175,92 @@ function itemForm(id=null,defaultLocation=null){
     const row={id:x?.id||uid(),name,locationId:String(f.get('locationId')||'')||null,category:String(f.get('category')||'').trim(),quantity,notes:String(f.get('notes')||'').trim(),createdAt:x?.createdAt||Date.now(),updatedAt:Date.now()};
     try{await requestStore('items','put',row);closeDialog();state.itemDetail=null;await refresh();toast('Oggetto salvato.');}catch(err){errorMessage(err);}
   });
+}
+// Associa in un'unica operazione più oggetti esistenti a una posizione.
+// Un oggetto può avere una sola posizione: non viene mai duplicato.
+function addExistingItemsDialog(locationId){
+ const destination=loc(locationId);
+ if(!destination){toast('Posizione non trovata.');return;}
+ const candidates=sortedItems(state.items.filter(x=>x.locationId!==locationId));
+ if(!candidates.length){toast('Non ci sono altri oggetti da aggiungere a questa posizione.');return;}
+ const selected=new Set();
+ showDialog(`<div class="dialog-header"><h2>Aggiungi a ${esc(destination.name)}</h2><button class="dialog-close" type="button" data-action="close-dialog" aria-label="Chiudi">×</button></div>
+  <p class="form-help">Seleziona gli oggetti già registrati che vuoi mettere in questa posizione. Se si trovano altrove, verranno spostati (non duplicati).</p>
+  <div class="field"><label for="existing-item-search">Cerca negli oggetti</label><input class="control" id="existing-item-search" type="search" autocomplete="off" placeholder="Nome, categoria o posizione precedente"></div>
+  <div id="existing-item-list" class="existing-item-list" role="group" aria-label="Oggetti disponibili"></div>
+  <p id="existing-item-count" class="form-help" aria-live="polite">0 oggetti selezionati</p>
+  <div class="dialog-footer"><button class="btn btn-outline" type="button" data-action="close-dialog">Annulla</button><button class="btn btn-primary" type="button" id="save-existing-items" disabled>Sposta selezionati</button></div>`);
+ const input=$('#existing-item-search'),list=$('#existing-item-list'),save=$('#save-existing-items'),count=$('#existing-item-count');
+ const draw=()=>{
+  const q=normalized(input.value);
+  const visible=candidates.filter(x=>normalized([x.name,x.category||'',x.notes||'',pathOf(x.locationId)].join(' ')).includes(q));
+  list.innerHTML=visible.length?visible.map(x=>`<label class="existing-item-row"><input type="checkbox" value="${esc(x.id)}" ${selected.has(x.id)?'checked':''}><span class="existing-item-content"><strong>${esc(x.name)}</strong><small>${esc(pathOf(x.locationId))}</small></span></label>`).join(''):'<p class="muted small">Nessun oggetto corrispondente alla ricerca.</p>';
+  const n=selected.size;
+  count.textContent=`${n} ${n===1?'oggetto selezionato':'oggetti selezionati'}`;
+  save.disabled=n===0;
+  save.textContent=n===0?'Sposta selezionati':`Sposta ${n} ${n===1?'oggetto':'oggetti'}`;
+ };
+ input.addEventListener('input',draw);
+ list.addEventListener('change',e=>{
+  const box=e.target.closest('input[type="checkbox"]');
+  if(!box)return;
+  if(box.checked)selected.add(box.value);else selected.delete(box.value);
+  draw();
+ });
+ save.addEventListener('click',async()=>{
+  if(!selected.size)return;
+  save.disabled=true;save.textContent='Spostamento…';
+  const moved=candidates.filter(x=>selected.has(x.id));
+  try{
+   await new Promise((resolve,reject)=>{
+    const tx=db.transaction('items','readwrite'),store=tx.objectStore('items'),now=Date.now();
+    for(const x of moved)store.put({...x,locationId,updatedAt:now});
+    tx.oncomplete=resolve;
+    tx.onerror=()=>reject(tx.error||new Error('Errore durante lo spostamento.'));
+    tx.onabort=()=>reject(tx.error||new Error('Spostamento annullato.'));
+   });
+   closeDialog();await refresh();
+   toast(`${moved.length} ${moved.length===1?'oggetto spostato':'oggetti spostati'} in ${destination.name}.`);
+  }catch(err){errorMessage(err);draw();}
+ });
+ draw();
+}
+// Spostamento atomico: mantiene nomi, note, categorie e fotografie delle posizioni.
+async function moveItemsBatch(ids,destinationId){
+ if(!loc(destinationId))throw new Error('La posizione di destinazione non esiste più.');
+ const unique=[...new Set(ids)];
+ const moving=unique.map(id=>item(id));
+ if(!moving.length||moving.some(x=>!x))throw new Error('Uno o più oggetti non sono più disponibili.');
+ await new Promise((resolve,reject)=>{
+  const tx=db.transaction('items','readwrite'),store=tx.objectStore('items'),now=Date.now();
+  for(const x of moving)store.put({...x,locationId:destinationId,updatedAt:now});
+  tx.oncomplete=resolve;
+  tx.onerror=()=>reject(tx.error||new Error('Errore durante lo spostamento.'));
+  tx.onabort=()=>reject(tx.error||new Error('Spostamento annullato.'));
+ });
+ return moving.length;
+}
+function bulkMoveDialog(){
+ const chosen=[...state.selectedItems].filter(id=>item(id));
+ if(!chosen.length){toast('Seleziona almeno un oggetto.');return;}
+ if(!state.locations.length){toast('Crea prima una posizione.');return;}
+ const destOptions=sortedLocations(state.locations).map(p=>`<option value="${esc(p.id)}">${esc(pathOf(p.id))}</option>`).join('');
+ showDialog(`<div class="dialog-header"><h2>Assegna una posizione</h2><button class="dialog-close" type="button" data-action="close-dialog" aria-label="Chiudi">×</button></div>
+  <p class="form-help">${chosen.length} ${chosen.length===1?'oggetto selezionato':'oggetti selezionati'}. Tutti verranno assegnati alla stessa posizione, senza creare duplicati.</p>
+  <form id="bulk-move-form"><div class="field"><label for="bulk-destination">Posizione di destinazione *</label><select class="control" id="bulk-destination" required><option value="">Seleziona una posizione…</option>${destOptions}</select></div>
+  <p class="form-help">Se un oggetto è in un'altra posizione, verrà spostato. Le altre informazioni non cambiano.</p>
+  <div class="dialog-footer"><button type="button" class="btn btn-outline" data-action="close-dialog">Annulla</button><button type="submit" class="btn btn-primary">Conferma spostamento</button></div></form>`);
+ $('#bulk-move-form').addEventListener('submit',async e=>{
+  e.preventDefault();const destinationId=$('#bulk-destination').value;
+  if(!destinationId){toast('Scegli una posizione.');return;}
+  const button=e.currentTarget.querySelector('[type="submit"]');button.disabled=true;button.textContent='Spostamento…';
+  try{
+   const count=await moveItemsBatch(chosen,destinationId);
+   const name=pathOf(destinationId);
+   state.selectedItems.clear();state.bulkSelecting=false;
+   closeDialog();await refresh();toast(`${count} ${count===1?'oggetto spostato':'oggetti spostati'} in ${name}.`);
+  }catch(err){errorMessage(err);button.disabled=false;button.textContent='Conferma spostamento';}
+ });
 }
 async function imageToJpeg(file){
   if(!file)return null;
@@ -223,7 +343,7 @@ async function importData(file){
      for(const x of data.items)tx.objectStore('items').put(x);
      tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);
    });
-   state.itemDetail=null;state.currentPlace=null;state.tab='search';state.query='';await refresh();toast('Archivio ripristinato correttamente.');
+   state.itemDetail=null;state.currentPlace=null;state.tab='search';state.query='';state.bulkSelecting=false;state.selectedItems.clear();state.itemsFilter='';await refresh();toast('Archivio ripristinato correttamente.');
  }catch(err){errorMessage(err);}
  finally{$('#import-file').value='';}
 }
@@ -236,6 +356,11 @@ function onAction(button){
  switch(action){
   case 'new-item':itemForm(null,button.dataset.parent||null);break;
   case 'new-location':locationForm(null,button.dataset.parent||null);break;
+  case 'add-existing-items':addExistingItemsDialog(id);break;
+  case 'toggle-bulk':state.bulkSelecting=!state.bulkSelecting;state.selectedItems.clear();render();break;
+  case 'bulk-select-visible':for(const x of filteredAndSortedItems())state.selectedItems.add(x.id);renderItemsList();break;
+  case 'bulk-clear':state.selectedItems.clear();renderItemsList();break;
+  case 'bulk-move':bulkMoveDialog();break;
   case 'edit-item':itemForm(id);break;
   case 'edit-location':locationForm(id);break;
   case 'delete-item':deleteItem(id);break;
@@ -255,7 +380,7 @@ async function init(){
  try{
   db=await openDatabase();
   document.body.addEventListener('click',e=>{const button=e.target.closest('[data-action]');if(button)onAction(button);});
-  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{state.tab=b.dataset.tab;state.itemDetail=null;render();window.scrollTo(0,0);}));
+  document.querySelectorAll('[data-tab]').forEach(b=>b.addEventListener('click',()=>{if(state.tab!==b.dataset.tab){state.bulkSelecting=false;state.selectedItems.clear();}state.tab=b.dataset.tab;state.itemDetail=null;render();window.scrollTo(0,0);}));
   $('#top-add').addEventListener('click',()=>itemForm(null,state.currentPlace));
   $('#photo-close').addEventListener('click',closeZoom);
   $('#photo-dialog').addEventListener('close',()=>{if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}$('#photo-full').removeAttribute('src');});
