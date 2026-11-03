@@ -6,7 +6,7 @@ const $ = sel => document.querySelector(sel);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, x => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[x]));
 const uid = () => (globalThis.crypto?.randomUUID?.() || `id-${Date.now()}-${Math.random().toString(36).slice(2)}`);
 const normalized = s => String(s??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('it').trim();
-const state = {tab:'search',query:'',order:'alpha',itemsFilter:'',bulkSelecting:false,selectedItems:new Set(),locations:[],items:[],currentPlace:null,itemDetail:null,photoUrls:[]};
+const state = {tab:'search',query:'',order:'alpha',itemsFilter:'',bulkSelecting:false,selectedItems:new Set(),locations:[],items:[],currentPlace:null,itemDetail:null,photoUrls:[],locationSaveNotice:null};
 let db, toastTimeout, previewUrl;
 
 function openDatabase() {
@@ -122,9 +122,11 @@ function renderPlaces(v){
  const here=state.currentPlace?loc(state.currentPlace):null;
  if(state.currentPlace&&!here)state.currentPlace=null;
  const id=here?.id||null,crumbs=here?ancestors(here.id):[];
+ const notice=state.locationSaveNotice?.id===id?state.locationSaveNotice:null;
  const children=sortedLocations(state.locations.filter(p=>(p.parentId||null)===id));
  const contents=sortedItems(state.items.filter(x=>x.locationId===id));
  v.innerHTML=`<div class="eyebrow">Esplora l'archivio</div><h1>${here?esc(here.name):'Le tue posizioni'}</h1><p class="top-copy">${here?esc(here.notes||'Contenuto della posizione selezionata.'):'Stanze, mobili, cassetti e scatole.'}</p>
+ ${notice?`<div class="save-confirmation" role="status"><span class="save-check" aria-hidden="true">✓</span><span><strong>${esc(notice.title)}</strong><small>${esc(notice.description)}</small></span></div>`:''}
  <div class="breadcrumbs"><button data-action="place" data-id="">Casa</button>${crumbs.map(p=>`<span>›</span><button data-action="place" data-id="${esc(p.id)}">${esc(p.name)}</button>`).join('')}</div>
  ${here?.photo?`<div class="photo-grid"><button class="photo-card" data-action="zoom" data-id="${esc(here.id)}"><img src="${photoUrl(here.photo)}" alt="Fotografia di ${esc(here.name)}"><span>Fotografia della posizione · Tocca per ingrandire</span></button></div>`:''}
  <div class="action-row"><button class="btn btn-primary" data-action="new-location" data-parent="${esc(id||'')}">+ Sottoposizione</button><button class="btn btn-secondary" data-action="new-item" data-parent="${esc(id||'')}">+ Oggetto qui</button></div>
@@ -148,7 +150,7 @@ function renderData(v){
   <div class="settings-panel"><h2>Esporta backup</h2><p>Scarica un file JSON con oggetti, posizioni e fotografie. Conservalo fuori dall'app.</p><button class="btn btn-primary" data-action="export">↓ Scarica backup completo</button></div>
   <div class="settings-panel"><h2>Ripristina backup</h2><p>Importa un backup già esportato. <strong>Sostituisce tutti i dati attuali</strong> di questo dispositivo.</p><button class="btn btn-outline" data-action="import">↑ Importa backup</button></div>
   <div class="settings-panel"><h2>Proteggi la memoria locale</h2><p>Chiedi al browser di non eliminare automaticamente l'archivio quando lo spazio scarseggia. Non sostituisce il backup.</p><button class="btn btn-secondary" data-action="persist">Richiedi archiviazione persistente</button></div>
-  <p class="small muted">Versione 0.3 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
+  <p class="small muted">Versione 0.4 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
 }
 function locationOptions(selected,excludeId=null){
   const excluded=new Set();
@@ -282,20 +284,58 @@ function locationForm(id=null,defaultParent=null){
  <div class="field"><label for="loc-parent">Si trova dentro</label><select class="control" id="loc-parent" name="parentId">${locationOptions(parent,id)}</select></div>
  <div class="field"><label for="loc-notes">Descrizione (facoltativa)</label><textarea class="control" name="notes" id="loc-notes" rows="2" maxlength="1500" placeholder="Es. Primo scaffale dall'alto">${esc(p?.notes||'')}</textarea></div>
  <div class="field"><label for="loc-photo">Fotografia (facoltativa)</label><input class="control" id="loc-photo" name="photo" type="file" accept="image/*"></div>
- ${p?.photo?`<label class="small"><input type="checkbox" name="removePhoto"> Rimuovi la fotografia attuale</label><p class="file-hint">Se non scegli un'altra foto, la fotografia esistente rimane.</p>`:'<p class="file-hint">Puoi scattare una foto oppure sceglierla dalla galleria.</p>'}
+ <div class="photo-preview" id="loc-photo-preview" aria-live="polite"></div>
+ ${p?.photo?`<label class="small photo-remove"><input id="loc-remove-photo" type="checkbox" name="removePhoto"> Rimuovi la fotografia attuale</label>`:''}
+ <p class="file-hint">La foto nuova viene salvata solo dopo aver premuto «Salva posizione».</p>
+ <p class="form-save-feedback" id="save-location-status" role="status" aria-live="polite"></p>
  <div class="dialog-footer"><button class="btn btn-outline" type="button" data-action="close-dialog">Annulla</button><button class="btn btn-primary" type="submit">Salva posizione</button></div></form>${p?`<div class="separator"></div><button class="btn btn-danger" data-action="delete-location" data-id="${esc(p.id)}">Elimina posizione vuota</button>`:''}`);
+ const photoInput=$('#loc-photo'),removeInput=$('#loc-remove-photo'),preview=$('#loc-photo-preview'),saveStatus=$('#save-location-status');
+ let currentPreviewUrl=null;
+ const clearPreviewUrl=()=>{if(currentPreviewUrl){URL.revokeObjectURL(currentPreviewUrl);currentPreviewUrl=null;}};
+ $('#form-dialog').addEventListener('close',clearPreviewUrl,{once:true});
+ function showPhotoPreview(){
+   clearPreviewUrl();preview.replaceChildren();
+   const file=photoInput.files?.[0];
+   const removed=Boolean(removeInput?.checked);
+   const blob=file||(!removed?p?.photo:null);
+   if(blob){
+     currentPreviewUrl=URL.createObjectURL(blob);
+     const image=document.createElement('img');image.src=currentPreviewUrl;
+     image.alt=file?'Anteprima della fotografia selezionata':'Fotografia attualmente salvata';
+     const caption=document.createElement('div');caption.className='photo-preview-label';
+     const title=document.createElement('strong');title.textContent=file?'Anteprima della nuova fotografia':'Fotografia attualmente salvata';
+     const description=document.createElement('span');description.textContent=file?'Non ancora salvata · '+file.name:'Già presente nell’archivio';
+     caption.append(title,description);preview.append(image,caption);
+   }else{
+     const hint=document.createElement('p');hint.className='photo-preview-empty';
+     hint.textContent=removed?'La fotografia attuale sarà rimossa quando salvi.':'Nessuna fotografia associata alla posizione.';
+     preview.append(hint);
+   }
+ }
+ photoInput.addEventListener('change',()=>{if(photoInput.files?.length&&removeInput)removeInput.checked=false;saveStatus.textContent='';showPhotoPreview();});
+ removeInput?.addEventListener('change',()=>{if(removeInput.checked)photoInput.value='';saveStatus.textContent='';showPhotoPreview();});
+ showPhotoPreview();
  $('#location-form').addEventListener('submit',async e=>{
    e.preventDefault();const f=new FormData(e.currentTarget);const name=String(f.get('name')||'').trim();if(!name){toast('Inserisci un nome.');return;}
    const parentId=String(f.get('parentId')||'')||null;
    if(id&&parentId&&(parentId===id||ancestors(parentId).some(l=>l.id===id))){toast('Non puoi inserire una posizione dentro se stessa.');return;}
    const btn=e.currentTarget.querySelector('[type="submit"]');btn.disabled=true;btn.textContent='Salvataggio…';
+   saveStatus.className='form-save-feedback';saveStatus.textContent='Elaborazione e salvataggio in corso…';
    try{
-     const file=f.get('photo');let photo=p?.photo||null;
-     if(f.get('removePhoto'))photo=null;
-     if(file instanceof File&&file.size>0)photo=await imageToJpeg(file);
+     const file=f.get('photo');const hasNewPhoto=file instanceof File&&file.size>0;
+     const removePhoto=Boolean(f.get('removePhoto'))&&!hasNewPhoto;
+     let photo=p?.photo||null;
+     if(removePhoto)photo=null;
+     if(hasNewPhoto){btn.textContent='Elaborazione foto…';photo=await imageToJpeg(file);btn.textContent='Salvataggio…';}
      const row={id:p?.id||uid(),name,parentId,notes:String(f.get('notes')||'').trim(),photo,createdAt:p?.createdAt||Date.now(),updatedAt:Date.now()};
-     await requestStore('locations','put',row);closeDialog();await refresh();toast('Posizione salvata.');
-   }catch(err){errorMessage(err);btn.disabled=false;btn.textContent='Salva posizione';}
+     // Aspettiamo che la transazione IndexedDB sia completa prima di mostrare il successo.
+     await requestStore('locations','put',row);
+     const title=hasNewPhoto?'Fotografia salvata correttamente':removePhoto?'Fotografia rimossa correttamente':'Posizione salvata correttamente';
+     const description=hasNewPhoto?'La foto è ora associata a questa posizione.':removePhoto?'La posizione non ha più una fotografia.':photo?'La fotografia esistente è stata mantenuta.':'La posizione è stata aggiornata.';
+     state.locationSaveNotice={id:row.id,title,description};
+     state.tab='places';state.currentPlace=row.id;state.itemDetail=null;
+     closeDialog();await refresh();toast(title);
+   }catch(err){errorMessage(err);saveStatus.className='form-save-feedback form-save-error';saveStatus.textContent='Salvataggio non riuscito. La fotografia non è stata aggiornata. Riprova.';btn.disabled=false;btn.textContent='Salva posizione';}
  });
 }
 async function deleteItem(id){const x=item(id);if(!x||!confirm(`Eliminare “${x.name}” dall'archivio?`))return;try{await requestStore('items','delete',id);state.itemDetail=null;await refresh();toast('Oggetto eliminato.');}catch(err){errorMessage(err);}}

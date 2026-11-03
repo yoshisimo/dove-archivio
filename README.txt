@@ -1,4 +1,4 @@
-DOV'È? — VERSIONE 0.3
+DOV'È? — VERSIONE 0.4
 ======================
 
 Un piccolo archivio personale per Android e computer.
@@ -64,7 +64,7 @@ PROSSIME VERSIONI POSSIBILI
 - Evidenziazione di scatole direttamente sulle foto
 - QR code su scatole/cassetti
 
-SELEZIONE MULTIPLA DA OGGETTI (v0.3)
+SELEZIONE MULTIPLA DA OGGETTI (v0.4)
 1. Apri Oggetti e tocca «Seleziona più oggetti».
 2. Filtra con «hard disk» per mostrare solo gli hard disk.
 3. Selezionali singolarmente o tocca «Seleziona tutti i risultati».
@@ -74,3 +74,16 @@ SELEZIONE MULTIPLA DA OGGETTI (v0.3)
    Nome, categoria, quantità e note rimangono invariati.
 La selezione può comprendere anche oggetti nascosti dal filtro corrente.
 Usa «Deseleziona tutti» per azzerare completamente la selezione.
+
+
+NOVITÀ VERSIONE 0.4
+------------------
+- Anteprima immediata della fotografia selezionata nella modifica posizione.
+- Distinzione evidente tra foto ancora da salvare e foto già nell'archivio.
+- Messaggio «Fotografia salvata correttamente» dopo la conferma IndexedDB.
+- Conferma verde permanente nella scheda della posizione con la fotografia caricata.
+- Eventuali errori di salvataggio sono mostrati anche nel modulo.
+- Dopo il salvataggio viene aperta la scheda della posizione, anche per quelle nuove.
+
+La versione 0.4 continua a usare lo stesso database locale delle versioni precedenti.
+Esportare un backup JSON prima di aggiornare; non cancellare dati del sito o app.
