@@ -1,4 +1,4 @@
-DOV'È? — VERSIONE 0.4
+DOV'È? — VERSIONE 0.4.1
 ======================
 
 Un piccolo archivio personale per Android e computer.
@@ -76,7 +76,7 @@ La selezione può comprendere anche oggetti nascosti dal filtro corrente.
 Usa «Deseleziona tutti» per azzerare completamente la selezione.
 
 
-NOVITÀ VERSIONE 0.4
+NOVITÀ VERSIONE 0.4.1
 ------------------
 - Anteprima immediata della fotografia selezionata nella modifica posizione.
 - Distinzione evidente tra foto ancora da salvare e foto già nell'archivio.
@@ -87,3 +87,20 @@ NOVITÀ VERSIONE 0.4
 
 La versione 0.4 continua a usare lo stesso database locale delle versioni precedenti.
 Esportare un backup JSON prima di aggiornare; non cancellare dati del sito o app.
+
+CORREZIONE v0.4.1
+------------------
+- Segnalazione separata degli errori di elaborazione foto e degli errori
+  di salvataggio sul telefono (invece del vecchio messaggio generico).
+- Lettura del file dal campo fotografia: migliore compatibilità Android.
+- JPEG ridimensionato con fallback al file originale JPG/PNG/WEBP
+  quando la conversione fallisce (se <= 8 MB).
+- Nessun falso errore quando il salvataggio riesce ma l'interfaccia
+  non si aggiorna correttamente.
+- File JS e CSS con versione per ridurre i problemi di cache.
+
+PER AGGIORNARE: esegui prima un backup, poi sostituisci i file su
+GitHub Pages. Conserva lo stesso URL/origine: il database non cambia.
+Non disinstallare l'app e non cancellare i dati del sito.
+Se viene mostrato ancora un errore, riportane il testo completo:
+ora indica la fase precisa (elaborazione o salvataggio).

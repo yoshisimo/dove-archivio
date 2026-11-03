@@ -150,7 +150,7 @@ function renderData(v){
   <div class="settings-panel"><h2>Esporta backup</h2><p>Scarica un file JSON con oggetti, posizioni e fotografie. Conservalo fuori dall'app.</p><button class="btn btn-primary" data-action="export">↓ Scarica backup completo</button></div>
   <div class="settings-panel"><h2>Ripristina backup</h2><p>Importa un backup già esportato. <strong>Sostituisce tutti i dati attuali</strong> di questo dispositivo.</p><button class="btn btn-outline" data-action="import">↑ Importa backup</button></div>
   <div class="settings-panel"><h2>Proteggi la memoria locale</h2><p>Chiedi al browser di non eliminare automaticamente l'archivio quando lo spazio scarseggia. Non sostituisce il backup.</p><button class="btn btn-secondary" data-action="persist">Richiedi archiviazione persistente</button></div>
-  <p class="small muted">Versione 0.4 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
+  <p class="small muted">Versione 0.4.1 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
 }
 function locationOptions(selected,excludeId=null){
   const excluded=new Set();
@@ -264,19 +264,51 @@ function bulkMoveDialog(){
   }catch(err){errorMessage(err);button.disabled=false;button.textContent='Conferma spostamento';}
  });
 }
+// Elabora le fotografie prima di salvarle: evitiamo file enormi e diamo errori leggibili.
 async function imageToJpeg(file){
-  if(!file)return null;
-  if(file.size>30*1024*1024)throw new Error('Fotografia troppo grande (massimo 30 MB).');
-  if(!file.type.startsWith('image/'))throw new Error('Seleziona un’immagine.');
+  if(!file || file.size === 0)throw new Error('Il file selezionato è vuoto. Scegli nuovamente la fotografia.');
+  if(file.size > 30*1024*1024)throw new Error('Fotografia troppo grande (massimo 30 MB).');
+  if(!file.type.startsWith('image/'))throw new Error('Il file non è riconosciuto come fotografia. Prova un JPEG o un PNG.');
   const u=URL.createObjectURL(file);
   try{
-    const image=new Image();image.src=u;await image.decode();
-    const max=1400,scale=Math.min(1,max/Math.max(image.naturalWidth,image.naturalHeight));
-    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));
-    canvas.getContext('2d').drawImage(image,0,0,canvas.width,canvas.height);
-    return await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Non riesco a elaborare questa foto.')),'image/jpeg',.78));
+    const img=new Image();
+    await new Promise((resolve,reject)=>{
+      img.onload=resolve;
+      img.onerror=()=>reject(new Error('Formato fotografico non leggibile dal browser. Prova una foto JPG o PNG.'));
+      img.src=u;
+    });
+    if(!img.naturalWidth || !img.naturalHeight)throw new Error('La fotografia non ha dimensioni valide.');
+    const scale=Math.min(1,1400/Math.max(img.naturalWidth,img.naturalHeight));
+    const canvas=document.createElement('canvas');
+    canvas.width=Math.max(1,Math.round(img.naturalWidth*scale));
+    canvas.height=Math.max(1,Math.round(img.naturalHeight*scale));
+    const ctx=canvas.getContext('2d');
+    if(!ctx)throw new Error('Impossibile preparare la fotografia su questo dispositivo.');
+    ctx.drawImage(img,0,0,canvas.width,canvas.height);
+    const result=await new Promise((resolve,reject)=>{
+      canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Conversione della foto non riuscita.')),'image/jpeg',.78);
+    });
+    return result;
+  }catch(err){
+    // Se la compressione fallisce ma il file è un formato web comune,
+    // tentiamo il salvataggio dell'originale, evitando di perdere la foto.
+    if(['image/jpeg','image/png','image/webp'].includes(file.type) && file.size <= 8*1024*1024 &&
+       !/Formato fotografico non leggibile|dimensioni valide/.test(err?.message||'')){
+      return file;
+    }
+    throw err;
   }finally{URL.revokeObjectURL(u);}
 }
+function locationSaveError(err,stage){
+  console.error('Salvataggio posizione fallito:',stage,err);
+  const code=err?.name||'';
+  let detail=err?.message||'Errore sconosciuto.';
+  if(code==='QuotaExceededError')detail='Lo spazio di archiviazione del browser potrebbe essere esaurito. Libera spazio e riprova.';
+  else if(code==='SecurityError')detail='Chrome sta bloccando l’accesso alla memoria locale. Apri l’app normalmente, non in incognito.';
+  else if(code==='NotReadableError')detail='Il file non è leggibile. Seleziona di nuovo la foto dalla galleria.';
+  return `Salvataggio non riuscito durante ${stage}. ${detail}${code?` [${code}]`:''}`;
+}
+
 function locationForm(id=null,defaultParent=null){
  const p=id?loc(id):null;const parent=defaultParent||p?.parentId||'';
  showDialog(`<div class="dialog-header"><h2>${p?'Modifica posizione':'Nuova posizione'}</h2><button class="dialog-close" type="button" data-action="close-dialog" aria-label="Chiudi">×</button></div><form id="location-form">
@@ -316,26 +348,61 @@ function locationForm(id=null,defaultParent=null){
  removeInput?.addEventListener('change',()=>{if(removeInput.checked)photoInput.value='';saveStatus.textContent='';showPhotoPreview();});
  showPhotoPreview();
  $('#location-form').addEventListener('submit',async e=>{
-   e.preventDefault();const f=new FormData(e.currentTarget);const name=String(f.get('name')||'').trim();if(!name){toast('Inserisci un nome.');return;}
+   e.preventDefault();
+   const form=e.currentTarget;
+   const f=new FormData(form);
+   const name=String(f.get('name')||'').trim();
+   if(!name){toast('Inserisci un nome.');return;}
    const parentId=String(f.get('parentId')||'')||null;
    if(id&&parentId&&(parentId===id||ancestors(parentId).some(l=>l.id===id))){toast('Non puoi inserire una posizione dentro se stessa.');return;}
-   const btn=e.currentTarget.querySelector('[type="submit"]');btn.disabled=true;btn.textContent='Salvataggio…';
-   saveStatus.className='form-save-feedback';saveStatus.textContent='Elaborazione e salvataggio in corso…';
+   const btn=form.querySelector('[type="submit"]');
+   btn.disabled=true;btn.textContent='Salvataggio…';
+   saveStatus.className='form-save-feedback';saveStatus.textContent='Preparazione del salvataggio…';
+   let stage='lettura dei dati';
+   let saved=false;
+   let row;
+   let title;
    try{
-     const file=f.get('photo');const hasNewPhoto=file instanceof File&&file.size>0;
-     const removePhoto=Boolean(f.get('removePhoto'))&&!hasNewPhoto;
+     // Leggiamo il file direttamente dal campo: è più affidabile di FormData
+     // sui browser mobili, specialmente quando si usano galleria e fotocamera.
+     const file=photoInput.files?.[0]||null;
+     const hasNewPhoto=Boolean(file&&file.size>0);
+     const removePhoto=Boolean(removeInput?.checked)&&!hasNewPhoto;
      let photo=p?.photo||null;
      if(removePhoto)photo=null;
-     if(hasNewPhoto){btn.textContent='Elaborazione foto…';photo=await imageToJpeg(file);btn.textContent='Salvataggio…';}
-     const row={id:p?.id||uid(),name,parentId,notes:String(f.get('notes')||'').trim(),photo,createdAt:p?.createdAt||Date.now(),updatedAt:Date.now()};
-     // Aspettiamo che la transazione IndexedDB sia completa prima di mostrare il successo.
+     if(hasNewPhoto){
+       stage='elaborazione della fotografia';
+       btn.textContent='Elaborazione foto…';
+       saveStatus.textContent='Elaborazione della fotografia in corso…';
+       photo=await imageToJpeg(file);
+     }
+     row={id:p?.id||uid(),name,parentId,notes:String(f.get('notes')||'').trim(),photo,createdAt:p?.createdAt||Date.now(),updatedAt:Date.now()};
+     stage='scrittura nella memoria locale';
+     btn.textContent='Salvataggio…';
+     saveStatus.textContent='Salvataggio nella memoria del telefono…';
      await requestStore('locations','put',row);
-     const title=hasNewPhoto?'Fotografia salvata correttamente':removePhoto?'Fotografia rimossa correttamente':'Posizione salvata correttamente';
+     // Arriviamo qui solo dopo che la transazione IndexedDB è completata.
+     saved=true;
+     title=hasNewPhoto?'Fotografia salvata correttamente':removePhoto?'Fotografia rimossa correttamente':'Posizione salvata correttamente';
      const description=hasNewPhoto?'La foto è ora associata a questa posizione.':removePhoto?'La posizione non ha più una fotografia.':photo?'La fotografia esistente è stata mantenuta.':'La posizione è stata aggiornata.';
      state.locationSaveNotice={id:row.id,title,description};
+   }catch(err){
+     const message=locationSaveError(err,stage);
+     saveStatus.className='form-save-feedback form-save-error';
+     saveStatus.textContent=message;
+     btn.disabled=false;btn.textContent='Riprova salvataggio';
+     return;
+   }
+   // Non confondiamo un problema di aggiornamento dell'interfaccia con
+   // un fallimento del salvataggio: il database è già stato aggiornato.
+   if(saved){
      state.tab='places';state.currentPlace=row.id;state.itemDetail=null;
-     closeDialog();await refresh();toast(title);
-   }catch(err){errorMessage(err);saveStatus.className='form-save-feedback form-save-error';saveStatus.textContent='Salvataggio non riuscito. La fotografia non è stata aggiornata. Riprova.';btn.disabled=false;btn.textContent='Salva posizione';}
+     try{closeDialog();await refresh();toast(title);}
+     catch(err){
+       console.error('Posizione salvata, ma vista non aggiornata:',err);
+       alert('La posizione è stata salvata, ma la schermata non si è aggiornata. Chiudi e riapri l’app.');
+     }
+   }
  });
 }
 async function deleteItem(id){const x=item(id);if(!x||!confirm(`Eliminare “${x.name}” dall'archivio?`))return;try{await requestStore('items','delete',id);state.itemDetail=null;await refresh();toast('Oggetto eliminato.');}catch(err){errorMessage(err);}}
