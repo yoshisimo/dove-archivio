@@ -150,7 +150,7 @@ function renderData(v){
   <div class="settings-panel"><h2>Esporta backup</h2><p>Scarica un file JSON con oggetti, posizioni e fotografie. Conservalo fuori dall'app.</p><button class="btn btn-primary" data-action="export">↓ Scarica backup completo</button></div>
   <div class="settings-panel"><h2>Ripristina backup</h2><p>Importa un backup già esportato. <strong>Sostituisce tutti i dati attuali</strong> di questo dispositivo.</p><button class="btn btn-outline" data-action="import">↑ Importa backup</button></div>
   <div class="settings-panel"><h2>Proteggi la memoria locale</h2><p>Chiedi al browser di non eliminare automaticamente l'archivio quando lo spazio scarseggia. Non sostituisce il backup.</p><button class="btn btn-secondary" data-action="persist">Richiedi archiviazione persistente</button></div>
-  <p class="small muted">Versione 0.4.1 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
+  <p class="small muted">Versione 0.4.2 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
 }
 function locationOptions(selected,excludeId=null){
   const excluded=new Set();
@@ -264,17 +264,29 @@ function bulkMoveDialog(){
   }catch(err){errorMessage(err);button.disabled=false;button.textContent='Conferma spostamento';}
  });
 }
-// Elabora le fotografie prima di salvarle: evitiamo file enormi e diamo errori leggibili.
+// v0.4.2: i comuni file JPEG/PNG/WEBP vengono salvati direttamente.
+// L'anteprima non garantisce che una seconda decodifica tramite Image()+canvas
+// riesca su tutti i browser Android. Non dipendiamo da tale decodifica per
+// fotografie di dimensioni normali; questo preserva anche l'originale.
 async function imageToJpeg(file){
   if(!file || file.size === 0)throw new Error('Il file selezionato è vuoto. Scegli nuovamente la fotografia.');
   if(file.size > 30*1024*1024)throw new Error('Fotografia troppo grande (massimo 30 MB).');
-  if(!file.type.startsWith('image/'))throw new Error('Il file non è riconosciuto come fotografia. Prova un JPEG o un PNG.');
+  const type = ({'image/jpg':'image/jpeg','image/pjpeg':'image/jpeg'}[file.type] || file.type || '').toLowerCase();
+  const ext = (file.name || '').split('.').pop().toLowerCase();
+  const normalizedType = ['image/jpeg','image/png','image/webp'].includes(type) ? type :
+    (['jpg','jpeg'].includes(ext) ? 'image/jpeg' : ext==='png' ? 'image/png' : ext==='webp' ? 'image/webp' : type);
+  const commonFormat = ['image/jpeg','image/png','image/webp'].includes(normalizedType);
+  // Percorso affidabile per fotografie della galleria: nessuna conversione.
+  if(commonFormat && file.size<=12*1024*1024){
+    return new Blob([file],{type:normalizedType});
+  }
+  // Comprimi solo le fotografie molto grandi o i formati non comuni.
   const u=URL.createObjectURL(file);
   try{
     const img=new Image();
     await new Promise((resolve,reject)=>{
       img.onload=resolve;
-      img.onerror=()=>reject(new Error('Formato fotografico non leggibile dal browser. Prova una foto JPG o PNG.'));
+      img.onerror=()=>reject(new Error('Impossibile leggere il formato della fotografia. Scegli un JPG o PNG.'));
       img.src=u;
     });
     if(!img.naturalWidth || !img.naturalHeight)throw new Error('La fotografia non ha dimensioni valide.');
@@ -285,17 +297,13 @@ async function imageToJpeg(file){
     const ctx=canvas.getContext('2d');
     if(!ctx)throw new Error('Impossibile preparare la fotografia su questo dispositivo.');
     ctx.drawImage(img,0,0,canvas.width,canvas.height);
-    const result=await new Promise((resolve,reject)=>{
-      canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Conversione della foto non riuscita.')),'image/jpeg',.78);
+    return await new Promise((resolve,reject)=>{
+      canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Conversione della fotografia non riuscita.')),'image/jpeg',.78);
     });
-    return result;
   }catch(err){
-    // Se la compressione fallisce ma il file è un formato web comune,
-    // tentiamo il salvataggio dell'originale, evitando di perdere la foto.
-    if(['image/jpeg','image/png','image/webp'].includes(file.type) && file.size <= 8*1024*1024 &&
-       !/Formato fotografico non leggibile|dimensioni valide/.test(err?.message||'')){
-      return file;
-    }
+    // Se il browser non riesce a comprimere il file, il formato comune è
+    // comunque salvabile come Blob, se c'è spazio sul dispositivo.
+    if(commonFormat)return new Blob([file],{type:normalizedType});
     throw err;
   }finally{URL.revokeObjectURL(u);}
 }

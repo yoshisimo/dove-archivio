@@ -104,3 +104,15 @@ GitHub Pages. Conserva lo stesso URL/origine: il database non cambia.
 Non disinstallare l'app e non cancellare i dati del sito.
 Se viene mostrato ancora un errore, riportane il testo completo:
 ora indica la fase precisa (elaborazione o salvataggio).
+
+
+CORREZIONE v0.4.2
+------------------
+- Fotografie JPG/PNG/WEBP fino a 12 MB salvate direttamente senza conversione
+  mediante Image()+canvas. Evita un errore di decodifica osservato su Android.
+- Le immagini più grandi vengono ancora compresse, quando possibile, oppure
+  salvate nel formato originale per evitare perdita della fotografia.
+- Nessuna modifica alla struttura del database o ai backup esistenti.
+- Nuova versione dei file e della cache dell’app (v042).
+ATTENZIONE: l'assenza di compressione per fotografie sotto 12 MB può occupare
+più memoria locale. Conservare backup periodici.
