@@ -45,7 +45,17 @@ function countWithin(id){const ids=new Set([id]);for(let i=0;i<state.locations.l
 function sortedLocations(arr){return [...arr].sort((a,b)=>a.name.localeCompare(b.name,'it'));}
 function sortedItems(arr){return [...arr].sort((a,b)=>a.name.localeCompare(b.name,'it'));}
 function disposeUrls(){state.photoUrls.forEach(u=>URL.revokeObjectURL(u));state.photoUrls=[];}
-function photoUrl(blob){if(!(blob instanceof Blob))return '';const url=URL.createObjectURL(blob);state.photoUrls.push(url);return url;}
+// Compatibilità con foto legacy (Blob) e foto v0.4.3 (data URL string).
+// Nella nuova versione IndexedDB non memorizza più oggetti Blob per le foto.
+function isPhotoDataUrl(value){
+  return typeof value==='string' && /^data:image\/(?:jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+function photoUrl(photo){
+  if(isPhotoDataUrl(photo))return photo;
+  if(!(photo instanceof Blob))return '';
+  const url=URL.createObjectURL(photo);state.photoUrls.push(url);return url;
+}
+
 function toast(msg){const e=$('#toast');e.textContent=msg;e.classList.add('show');clearTimeout(toastTimeout);toastTimeout=setTimeout(()=>e.classList.remove('show'),3500);}
 function errorMessage(e){console.error(e);toast(e?.message||'Si è verificato un errore.');}
 function buttonsForNav(){document.querySelectorAll('[data-tab]').forEach(b=>{b.classList.toggle('active',b.dataset.tab===state.tab);b.setAttribute('aria-current',b.dataset.tab===state.tab?'page':'false');});}
@@ -150,7 +160,7 @@ function renderData(v){
   <div class="settings-panel"><h2>Esporta backup</h2><p>Scarica un file JSON con oggetti, posizioni e fotografie. Conservalo fuori dall'app.</p><button class="btn btn-primary" data-action="export">↓ Scarica backup completo</button></div>
   <div class="settings-panel"><h2>Ripristina backup</h2><p>Importa un backup già esportato. <strong>Sostituisce tutti i dati attuali</strong> di questo dispositivo.</p><button class="btn btn-outline" data-action="import">↑ Importa backup</button></div>
   <div class="settings-panel"><h2>Proteggi la memoria locale</h2><p>Chiedi al browser di non eliminare automaticamente l'archivio quando lo spazio scarseggia. Non sostituisce il backup.</p><button class="btn btn-secondary" data-action="persist">Richiedi archiviazione persistente</button></div>
-  <p class="small muted">Versione 0.4.2 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
+  <p class="small muted">Versione 0.4.3 · I dati non vengono sincronizzati online. Non cancellare i dati del sito senza aver esportato un backup.</p>`;
 }
 function locationOptions(selected,excludeId=null){
   const excluded=new Set();
@@ -264,6 +274,7 @@ function bulkMoveDialog(){
   }catch(err){errorMessage(err);button.disabled=false;button.textContent='Conferma spostamento';}
  });
 }
+// v0.4.3: convertiamo i file in data URL prima di salvarli in IndexedDB.
 // v0.4.2: i comuni file JPEG/PNG/WEBP vengono salvati direttamente.
 // L'anteprima non garantisce che una seconda decodifica tramite Image()+canvas
 // riesca su tutti i browser Android. Non dipendiamo da tale decodifica per
@@ -307,6 +318,43 @@ async function imageToJpeg(file){
     throw err;
   }finally{URL.revokeObjectURL(u);}
 }
+// Il browser Android dell'utente può rifiutare i Blob in IndexedDB
+// (Failed to write blobs / InvalidBlob). FileReader produce invece
+// una normale stringa serializzabile, leggibile anche nei backup JSON.
+async function photoToStorageData(file){
+  if(!file || !file.size)throw new Error('Seleziona nuovamente la fotografia.');
+  if(file.size>30*1024*1024)throw new Error('Fotografia troppo grande (massimo 30 MB).');
+  const type=(file.type||'').toLowerCase();
+  const ext=(file.name||'').split('.').pop().toLowerCase();
+  const normalizedType=['image/jpeg','image/png','image/webp'].includes(type)?type:
+    (['jpg','jpeg'].includes(ext)?'image/jpeg':ext==='png'?'image/png':ext==='webp'?'image/webp':type);
+  let data;
+  if(['image/jpeg','image/png','image/webp'].includes(normalizedType) && file.size<=12*1024*1024){
+    // Leggiamo i byte direttamente dal File selezionato, senza creare altri Blob.
+    // Alcune gallerie Android forniscono un MIME generico: preserviamo il tipo reale.
+    const read=await blobToDataURL(file);
+    const comma=read.indexOf(',');
+    if(comma<0)throw new Error('Il browser non riesce a leggere i dati della fotografia.');
+    data=`data:${normalizedType};base64,${read.slice(comma+1)}`;
+  }else{
+    // Foto molto grandi: tentativo di ridimensionamento; si salva comunque
+    // come stringa, non come Blob nel database.
+    const processed=await imageToJpeg(file);
+    data=await blobToDataURL(processed);
+  }
+  if(!isPhotoDataUrl(data))throw new Error('Impossibile convertire questa foto in un formato supportato (JPG, PNG o WEBP).');
+  return data;
+}
+async function existingPhotoToStorageData(photo){
+  if(!photo)return null;
+  if(isPhotoDataUrl(photo))return photo;
+  if(photo instanceof Blob){
+    const data=await blobToDataURL(photo);
+    if(!isPhotoDataUrl(data))throw new Error('La fotografia precedente non è in un formato supportato.');
+    return data;
+  }
+  throw new Error('La fotografia precedente contiene dati non validi.');
+}
 function locationSaveError(err,stage){
   console.error('Salvataggio posizione fallito:',stage,err);
   const code=err?.name||'';
@@ -339,8 +387,8 @@ function locationForm(id=null,defaultParent=null){
    const removed=Boolean(removeInput?.checked);
    const blob=file||(!removed?p?.photo:null);
    if(blob){
-     currentPreviewUrl=URL.createObjectURL(blob);
-     const image=document.createElement('img');image.src=currentPreviewUrl;
+     if(blob instanceof Blob){currentPreviewUrl=URL.createObjectURL(blob);}
+     const image=document.createElement('img');image.src=currentPreviewUrl||photoUrl(blob);
      image.alt=file?'Anteprima della fotografia selezionata':'Fotografia attualmente salvata';
      const caption=document.createElement('div');caption.className='photo-preview-label';
      const title=document.createElement('strong');title.textContent=file?'Anteprima della nuova fotografia':'Fotografia attualmente salvata';
@@ -382,7 +430,12 @@ function locationForm(id=null,defaultParent=null){
        stage='elaborazione della fotografia';
        btn.textContent='Elaborazione foto…';
        saveStatus.textContent='Elaborazione della fotografia in corso…';
-       photo=await imageToJpeg(file);
+       photo=await photoToStorageData(file);
+     }else if(photo instanceof Blob){
+       // Convertiamo solo quando serve: nessuna migrazione distruttiva del database.
+       stage='conversione della fotografia esistente';
+       saveStatus.textContent='Aggiornamento del formato della fotografia precedente…';
+       photo=await existingPhotoToStorageData(photo);
      }
      row={id:p?.id||uid(),name,parentId,notes:String(f.get('notes')||'').trim(),photo,createdAt:p?.createdAt||Date.now(),updatedAt:Date.now()};
      stage='scrittura nella memoria locale';
@@ -419,7 +472,7 @@ async function deleteLocation(id){const p=loc(id);if(!p)return;
  if(!confirm(`Eliminare la posizione vuota “${p.name}”?`))return;
  try{await requestStore('locations','delete',id);closeDialog();state.currentPlace=p.parentId||null;await refresh();toast('Posizione eliminata.');}catch(err){errorMessage(err);}
 }
-function zoom(id){const p=loc(id);if(!p?.photo)return;previewUrl=URL.createObjectURL(p.photo);$('#photo-full').src=previewUrl;$('#photo-full').alt=`Fotografia di ${p.name}`;$('#photo-dialog').showModal();}
+function zoom(id){const p=loc(id);if(!p?.photo)return;previewUrl=p.photo instanceof Blob?URL.createObjectURL(p.photo):null;$('#photo-full').src=previewUrl||photoUrl(p.photo);$('#photo-full').alt=`Fotografia di ${p.name}`;$('#photo-dialog').showModal();}
 function closeZoom(){const dialog=$('#photo-dialog');if(dialog.open)dialog.close();if(previewUrl){URL.revokeObjectURL(previewUrl);previewUrl=null;}$('#photo-full').removeAttribute('src');}
 function blobToDataURL(blob){return new Promise((resolve,reject)=>{const f=new FileReader();f.onload=()=>resolve(f.result);f.onerror=()=>reject(f.error);f.readAsDataURL(blob);});}
 function dataURLToBlob(url){
@@ -429,7 +482,7 @@ function dataURLToBlob(url){
 async function exportData(){
  try{
    const positions=[];
-   for(const p of state.locations)positions.push({...p,photo:p.photo?await blobToDataURL(p.photo):null});
+   for(const p of state.locations)positions.push({...p,photo:await existingPhotoToStorageData(p.photo)});
    const content={app:'dove-archivio',schema:1,exportedAt:new Date().toISOString(),locations:positions,items:state.items};
    const file=new Blob([JSON.stringify(content)],{type:'application/json'});
    const url=URL.createObjectURL(file);const a=document.createElement('a');a.href=url;a.download=`dove-backup-${new Date().toISOString().slice(0,10)}.json`;document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);toast('Backup creato: conserva il file al sicuro.');
@@ -449,7 +502,12 @@ async function importData(file){
  try{
    const raw=await file.text();const data=JSON.parse(raw);validateImport(data);
    if(!confirm(`Il backup contiene ${data.items.length} oggetti e ${data.locations.length} posizioni. Vuoi SOSTITUIRE completamente l'archivio su questo dispositivo?`))return;
-   const positions=data.locations.map(p=>({...p,photo:p.photo?dataURLToBlob(p.photo):null}));
+   // Anche i backup più vecchi contengono immagini come data URL.
+   // Non ricreiamo Blob: sui dispositivi interessati bloccherebbero il ripristino.
+   const positions=data.locations.map(p=>{
+     if(p.photo!=null&&!isPhotoDataUrl(p.photo))throw new Error('Il backup contiene una fotografia non valida.');
+     return {...p,photo:p.photo||null};
+   });
    // Una sola transazione: evita cancellazioni parziali in caso di errore.
    await new Promise((resolve,reject)=>{
      const tx=db.transaction(['items','locations'],'readwrite');

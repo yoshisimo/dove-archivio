@@ -1,4 +1,4 @@
-DOV'È? — VERSIONE 0.4.1
+DOV'È? — VERSIONE 0.4.3
 ======================
 
 Un piccolo archivio personale per Android e computer.
@@ -116,3 +116,20 @@ CORREZIONE v0.4.2
 - Nuova versione dei file e della cache dell’app (v042).
 ATTENZIONE: l'assenza di compressione per fotografie sotto 12 MB può occupare
 più memoria locale. Conservare backup periodici.
+
+CORREZIONE v0.4.3 — ERRORE INVALIDBLOB SU CHROME ANDROID
+---------------------------------------------------------
+- Corretto il salvataggio fotografie con errore:
+  "Failed to write blobs (InvalidBlob) [DataError]".
+- Le nuove foto sono salvate come data URL (stringhe), non Blob IndexedDB.
+- Le fotografie delle versioni precedenti continuano a essere visibili.
+- Quando una posizione con una vecchia fotografia viene modificata,
+  la foto viene convertita nel nuovo formato senza perdita di dati.
+- Esportazione e importazione backup JSON compatibili con versioni precedenti.
+- Lo stesso archivio locale esistente resta utilizzabile.
+- Le stringhe base64 occupano circa un terzo in più della dimensione
+  binaria originale: fare attenzione alle immagini molto grandi.
+- Non cancellare dati del sito né disinstallare l'app. Esportare un backup
+  prima di aggiornare. Verificare in Dati la versione 0.4.3.
+- Aggiornamento da GitHub Pages: caricare il contenuto dello ZIP,
+  mantenendo stesso indirizzo della PWA. Aprire ?v=043 per controllo cache.
